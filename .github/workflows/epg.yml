@@ -13,7 +13,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - url: https://epg.112114.xyz/pp.xml.gz
+          - url: https://raw.githubusercontent.com/sparkssssssssss/epg/main/pp.xml.gz
             branch: 112114
             sleep: 0s
           - url: https://e.erw.cc/e.xml.gz
