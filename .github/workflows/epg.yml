@@ -11,98 +11,74 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
         include:
           - url: https://raw.githubusercontent.com/sparkssssssssss/epg/main/pp.xml.gz
             branch: 112114
-            sleep: 0
+            sleep: 0s
           #- url: https://e.erw.cc/e.xml.gz
           #  branch: erw
-          #  sleep: 30
+          #  sleep: 30s
           #- url: http://epg.51zmt.top:8000/e.xml
           #  branch: 51zmt
-          #  sleep: 60
+          #  sleep: 60s
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ matrix.branch }}
-          path: epg
-
-      - name: Download files with retry
+      - name: download files
         run: |
-          max_retries=3
-          retry_count=0
-          until [ $retry_count -ge $max_retries ]
-          do
-            wget https://raw.githubusercontent.com/${{ github.repository }}/${{ matrix.branch }}/md5.txt -O md5.txt && break
-            retry_count=$((retry_count+1))
-            sleep 10
-          done
-          
+          wget https://raw.githubusercontent.com/${{ github.repository }}/${{ matrix.branch }}/md5.txt -O md5.txt
           url="${{ matrix.url }}"
-          retry_count=0
-          until [ $retry_count -ge $max_retries ]
-          do
-            if [[ "$url" == *".gz" ]]; then
-              wget $url -O e.xml.gz && gzip -df e.xml.gz && break
-            else
-              wget $url -O e.xml && break
-            fi
-            retry_count=$((retry_count+1))
-            sleep 10
-          done
-          [ $retry_count -lt $max_retries ] || exit 1
-
-      - name: Check MD5
-        run: |
-          if [ ! -f "e.xml" ]; then
-            echo "File download failed"
-            exit 1
+          if [[ "$url" == *".gz" ]]; then
+            echo "Downloading gzipped file"
+            wget $url -O e.xml.gz
+            gzip -df e.xml.gz
+          else
+            echo "Downloading plain XML file"
+            wget $url -O e.xml
           fi
-          
+
+      - name: check md5
+        run: |
           md5=$(md5sum ./e.xml | awk '{print $1}')
           if ! grep -q "$md5" ./md5.txt; then
             echo "isDiff=$md5" >> $GITHUB_ENV
-            now_time=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
+            now_time=$(date -u -d '+8 hour' '+%Y-%m-%d %H:%M:%S')
             echo "now_time=$now_time" >> $GITHUB_ENV
-            tag=$(TZ=Asia/Shanghai date '+%Y.%m.%d')
+            tag=$(date -u -d '+8 hour' '+%Y.%m.%d')
             echo "tag=$tag" >> $GITHUB_ENV
           fi
 
       - uses: actions/setup-python@v5
-        if: ${{ env.isDiff }}
         with:
           python-version: '3.12'
 
-      - name: Convert XML to JSON
+      - name: checkout code
+        uses: actions/checkout@v4
+        if: ${{ env.isDiff }}
+        with:
+          ref: ${{ matrix.branch }}
+          path: epg
+
+      - name: xml to json
         if: ${{ env.isDiff }}
         working-directory: epg
         run: |
           mkdir -p ./xml ./json
           mv -f ../e.xml ./xml/e.xml
           pip install -r requirements.txt
-          python xml2json.py || exit 1
+          python xml2json.py
 
-      - name: Move and commit files
+      - name: move file
         if: ${{ env.isDiff }}
         working-directory: epg
         run: |
+          now_date=$(date -u -d '+8 hour' '+%Y-%m-%d')
           mv -f ./xml/e.xml ./xml/${{ matrix.branch }}.xml
           mv -f ./json/e.json ./json/${{ matrix.branch }}.json
           echo "${{ env.isDiff }}" > ./md5.txt
           sleep ${{ matrix.sleep }}
-
-          git config --local user.name "github-actions[bot]"
-          git config --local user.email "github-actions[bot]@users.noreply.github.com"
-          sed "2c * 更新时间: ${{ env.now_time }}" README.md -i
-          git add --all
-          git commit -m "${{ env.now_time }}"
-          git push -f origin ${{ matrix.branch }}
 
       - uses: ncipollo/release-action@v1
         if: ${{ env.isDiff }}
@@ -113,3 +89,16 @@ jobs:
           artifacts: |
             epg/xml/*.xml
             epg/json/*.json
+
+      - name: Commit changes
+        if: ${{ env.isDiff }}
+        working-directory: epg
+        run: |
+          git config --local user.name "github-actions[bot]"
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          if [ -f README.md ]; then
+            sed -i "2c * 更新时间: ${{ env.now_time }}" README.md
+          fi
+          git add --all
+          git commit -m "${{ env.now_time }}"
+          git push -f origin ${{ matrix.branch }}
